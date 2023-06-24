@@ -1,0 +1,334 @@
+<center><h1 style="font-size:24px;">TCC - CIÊNCIA DE DADOS E BIG DATA</h1></center>
+<center><h1 style="font-size:24px;">CATEGORIZAÇÃO DE PRODUTOS - DATASET DA OLIST</h1></center>
+
+__Nome da aluna__: Mariana Silva Costa  
+__Matrícula__: 1162946  
+__Telefone__: (21) 9 8862-6509  
+__E-mail__: 1358597@sga.pucminas.br
+
+**1. IMPORTAÇÃO DE BIBLIOTECAS**
+
+# Importando bibliotecas básicas
+import pandas as pd   #processamento de dados
+from ydata_profiling import ProfileReport #análise de dados
+import numpy as np   #álgebra linear
+import seaborn as sns #visualização baseada em matplotlib
+sns.set_style("white") #gráficos sem grade
+import matplotlib.pyplot as plt #biblioteca base de visualização
+n = '\033[1m' #codificação de fonte em negrito
+r = '\033[22m' #redefenir a formatação em negrito
+
+# Importando a biblioteca scikit-learn e xgboost
+# Algoritimos de aprendizado de máquina, pré-processamento, seleção de modelos, métricas de desempenho, ...
+from sklearn.model_selection import KFold, cross_validate, cross_val_score, train_test_split, GridSearchCV
+from sklearn import tree
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.naive_bayes import GaussianNB
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, recall_score
+from sklearn.metrics import precision_score, f1_score, make_scorer
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import RobustScaler
+import xgboost as xgb
+
+# Importando a biblioteca scikit-optimize
+# Utilizada para Otimização Bayesiana de hiper parâmetros
+from skopt import BayesSearchCV
+from skopt.space import Real, Categorical, Integer
+
+**2. COLETA DE DADOS**
+
+# Importando os datasets de produtos e itens da Olist
+path = 'C://Users//user//Desktop//Pos_Ciencia_de_Dados\//TCC//Projeto'
+products_df = pd.read_csv(f'{path}//olist_products_dataset.csv')
+items_df = pd.read_csv(f'{path}//olist_order_items_dataset.csv')
+
+# Criando um dataframe compilado
+df = products_df
+df = pd.merge(df, items_df,  how='left', on='product_id')
+df.head()
+
+**3. PROCESSAMENTO/TRATAMENTO DE DADOS**
+
+# Análises do dataframe compilado
+profile = ProfileReport(df, title="Análise do dataframe compilado")
+profile
+
+# Exportando a análise
+profile.to_file("Relatorio_base.html")
+
+# Visualizando os tipos de colunas
+df.dtypes
+
+# Calculando os valores ausentes por colunas
+df.isnull().sum()
+
+# Eliminando duplicadas da coluna chave (product_id)
+df = df.drop_duplicates('product_id')
+# Eliminando linhas que contém elementos nulos
+df = df.dropna()
+df.info()
+
+# Convertendo a unidade de peso de grama para quilo
+df['product_weight_g'] = df['product_weight_g'].apply(lambda x: x/1000)
+df = df.rename(columns={'product_weight_g': 'product_weight_kg'})
+
+# Indentificando a quantidade de produtos em cada categoria
+df.product_category_name.value_counts()
+
+# Criando um dataframe enxuto
+df1 = df
+df1.drop(columns=['product_name_lenght', 'product_description_lenght', 'product_photos_qty', 'order_id', 'order_item_id', 'seller_id', 'shipping_limit_date', 'freight_value'], inplace=True)
+
+# Filtrando apenas 2 categorias de produtos
+df1 = df1[(df1['product_category_name'] == 'cama_mesa_banho') | (df1['product_category_name'] == 'beleza_saude')]
+
+# Transformando a coluna de categoria em tipo numérico
+df1 = df1.replace({'cama_mesa_banho':0, 'beleza_saude':1})
+
+# Simplificando os nomes das colunas no português
+df1.rename(columns={'product_category_name':'categoria', 'product_weight_kg':'peso_kg', 'product_length_cm':'comprimento_cm', 'product_height_cm':'altura_cm', 'product_width_cm':'largura_cm', 'price':'preco'}, inplace=True)
+display(df1)
+
+# Plotando as variáveis
+fig = plt.figure(figsize=(15, 15))
+# Gráfico 1 - Barras de contagem 
+fig.add_subplot(231) 
+sns.countplot(df1['categoria'])
+# Gráfico 2 - Boxplot de peso
+fig.add_subplot(232) 
+sns.boxplot(data=df1, x='categoria', y='peso_kg')
+# Gráfico 2 - Boxplot de comprimento
+fig.add_subplot(233) 
+sns.boxplot(data=df1, x='categoria', y='comprimento_cm')
+# Gráfico 3 - Boxplot de altura
+fig.add_subplot(234) 
+sns.boxplot(data=df1, x='categoria', y='altura_cm')
+# Gráfico 4 - Boxplot de largura
+fig.add_subplot(235) 
+sns.boxplot(data=df1, x='categoria', y='largura_cm')
+# Gráfico 4 - Boxplot de preço 
+fig.add_subplot(236) 
+sns.boxplot(data=df1, x='categoria', y='preco')
+print(f'{n}Boxplot das variáveis analisadas')
+plt.show()
+
+# Removendo outliers das variáveis
+peso_q95 = df1['peso_kg'].quantile(0.95)
+df1 = df1[df1['peso_kg'] < peso_q95]
+comprimento_q95 = df1['comprimento_cm'].quantile(0.95)
+df1 = df1[df1['comprimento_cm'] < comprimento_q95]
+altura_q95 = df1['altura_cm'].quantile(0.95)
+df1 = df1[df1['altura_cm'] < altura_q95]
+largura_q95 = df1['largura_cm'].quantile(0.95)
+df1 = df1[df1['largura_cm'] < largura_q95]
+preco_q95 = df1['preco'].quantile(0.95)
+df1 = df1[df1['preco'] < preco_q95]
+
+# Verificando como ficou o dataframe
+df1.info()
+df1.categoria.value_counts()
+
+**Normalização - Redimensionamento / Scaler**
+
+# Criando um dataframe apenas com as colunas numéricas e categoria
+numeric_df = df1.drop(['product_id'],axis=1)
+# Criando o scaler
+scaler = RobustScaler()
+# Fazendo o fit com os dados
+scaler = scaler.fit(numeric_df[['peso_kg']])
+scaler = scaler.fit(numeric_df[['comprimento_cm']])
+scaler = scaler.fit(numeric_df[['altura_cm']])
+scaler = scaler.fit(numeric_df[['largura_cm']])
+scaler = scaler.fit(numeric_df[['preco']])
+# Fazendo a transformação e criando columns_robust
+numeric_df['peso_kg_robust'] = scaler.transform(numeric_df[['peso_kg']])
+numeric_df['comprimento_cm_robust'] = scaler.transform(numeric_df[['comprimento_cm']])
+numeric_df['altura_cm_robust'] = scaler.transform(numeric_df[['altura_cm']])
+numeric_df['largura_cm_robust'] = scaler.transform(numeric_df[['largura_cm']])
+numeric_df['preco_robust'] = scaler.transform(numeric_df[['preco']])
+# Visualizando novamente os dados
+numeric_df.describe()
+
+
+**4. ANÁLISE E EXPLORAÇÃO DOS DADOS**
+
+# Analisando as informações estatísticas do df1-cama_mesa_banho
+print(f'{n}Informações Estatísticas da categoria cama, mesa e banho:')
+cmb = pd.DataFrame(data=df1)
+cmb.loc[cmb['categoria'] == 0].describe().round(2)
+
+# Analisando as informações estatísticas do df1-beleza_saude
+print(f'{n}Informações Estatísticas da categoria beleza e saúde:')
+bs = pd.DataFrame(data=df1)
+bs.loc[bs['categoria'] == 1].describe().round(2)
+
+# Criando um dataframe apenas com as colunas robust e categoria
+robust_df = numeric_df.drop(['peso_kg', 'comprimento_cm', 'altura_cm', 'largura_cm', 'preco'], axis=1)
+
+# Calculando a correlação emparelhada de colunas
+corr = robust_df.corr()
+
+# Plotando um Mapa de Correlação das robust_columns
+plt.figure(figsize=(10, 8))
+sns.heatmap(corr, cmap='RdBu', norm=plt.Normalize(-1,1), annot=True, fmt='.2f')
+print(f'{n}Mapa de Correlação')
+plt.show()
+
+# Pairplot das robust_columns
+sns.pairplot(robust_df, hue="categoria", markers=["o", "D"])
+print(f"{n}Pairplot das colunas numéricas")
+plt.show()
+
+**5. CRIAÇÃO E AVALIAÇÃO DE MODELOS DE MACHINE LEARNING**
+
+**5.1 TREINAMENTO DO MODELO**
+
+# Separando X e y
+X = robust_df.drop(['categoria'],axis=1)
+y = robust_df.categoria
+
+# Selecionando os conjuntos de treinamento (70%) e teste (30%)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.30, random_state=42)
+
+# Tamanhos de x e y de treino e de teste
+X_train.shape, X_test.shape
+
+# Ajustes da validação cruzada sem otimização de hiper parâmetros
+cv = KFold(n_splits=10,random_state=42,shuffle=True)
+
+**I. Árvore de decisão**
+
+Sem Otimização de Hiperparâmetros
+
+# Criando o classificador
+clf_dt = tree.DecisionTreeClassifier(random_state=1)
+# Calculando a acurácia e o desvio padrão
+score_dt = cross_val_score(clf_dt, X_train, y_train, scoring='accuracy', cv=cv, n_jobs=-1)
+print('acuráia: %.2f | desvio padrão: %.3f' % (np.mean(score_dt)*100, np.std(score_dt)))
+
+Com Otimização Bayesiana
+
+# Criando o classificador
+clf_dt_tunado = tree.DecisionTreeClassifier(random_state=2)
+# Fazendo o k-fold Cross-Validation
+score_dt_tunado = cross_val_score(clf_dt_tunado, X_train, y_train, scoring='accuracy', cv=5, n_jobs=-1)
+# Definindo o range de parâmetros
+dt_search_space = {"criterion": Categorical(['gini','entropy']),
+                   "splitter": Categorical(['best', 'random']),
+                   "max_depth": Integer(3, 15),
+                   "max_features": Categorical(['auto', 'sqrt', 'log2']),
+                  }
+# Fitando o Modelo e Medindo a Performance
+dt_bayes_search = BayesSearchCV(clf_dt_tunado, dt_search_space, scoring='accuracy', cv=5)
+dt_bayes_search.fit(X_train, y_train)
+
+# Configuração de parâmetro que deu os melhores resultados nos dados de espera
+dt_bayes_search.best_params_
+
+# Estimador que deu maior pontuação ou menor perda nos dados deixados de fora
+dt_bayes_search.best_estimator_
+
+# Calculando a acurácia
+print('acuráia: %.2f' % (np.mean(dt_bayes_search.best_score_)*100))
+
+**II. Regressão Logística**
+
+Sem Otimização de Hiperparâmetros
+
+# Criando o classificador
+clf_lr = LogisticRegression(random_state=3, max_iter=1000)
+# Calculando a acurácia e o desvio padrão
+score_lr = cross_val_score(clf_lr, X_train, y_train, scoring='accuracy', cv=cv)
+print('acuráia: %.2f | desvio padrão: %.3f' % (np.mean(score_lr)*100, np.std(score_lr)))
+
+**III. Naive Bayes**
+
+Sem Otimização de Hiperparâmetros
+
+# Criando o classificador
+clf_nb = GaussianNB()
+# Calculando a acurácia e o desvio padrão
+score_nb = cross_val_score(clf_nb, X_train, y_train, scoring='accuracy', cv=cv)
+print('acuráia: %.2f | desvio padrão: %.3f' % (np.mean(score_nb)*100, np.std(score_nb)))
+
+**IV. XGBoost - Xtreme Gradient Boosting**
+
+Sem Otimização de Hiperparâmetros
+
+# Criando o classificador
+clf_xgb = xgb.XGBClassifier(random_state=5)
+# Calculando a acurácia e o desvio padrão
+scores_xgb = cross_val_score(clf_xgb, X_train, y_train, scoring='accuracy', cv=cv)
+print('acuráia: %.2f | desvio padrão: %.3f' % (np.mean(scores_xgb)*100, np.std(scores_xgb)))
+
+Com Otimização Bayesiana
+
+# Criando o classificador
+clf_xgb_tunado = xgb.XGBClassifier(random_state=6)
+# Fazendo o k-fold Cross-Validation
+score_xgb_tunado = cross_val_score(clf_xgb_tunado, X_train, y_train, scoring='accuracy', cv=5, n_jobs=-1).mean()
+# Definindo o range de parâmetros
+xgb_search_space = {"max_depth": Integer(1,15),
+                    "min_child_weight": Integer(0, 3),
+                    "subsample": Real(0.1, 1.0),
+                    "colsample_bytree": Real(0.1, 1.0),
+                   }
+# Fitando o Modelo e Medindo a Performance
+xgb_bayes_search = BayesSearchCV(clf_xgb_tunado, xgb_search_space, scoring='accuracy', cv=5)
+xgb_bayes_search.fit(X_train, y_train)
+
+
+# Configuração de parâmetro que deu os melhores resultados nos dados de espera
+xgb_bayes_search.best_params_
+
+# Estimador que deu maior pontuação ou menor perda nos dados deixados de fora
+xgb_bayes_search.best_estimator_
+
+# Calculando a acurácia
+print('acuráia: %.2f' % (np.mean(xgb_bayes_search.best_score_)*100))
+
+**5.2 AVALIAÇÃO DO MODELO**
+
+O MELHOR CLASSIFICADOR >> xgb_bayes_search.best_estimator_
+
+# Realizando a predição da base de teste utilizando o melhor estimador encontrado
+xgb_bayes_search.best_estimator_.fit(X_train, y_train)
+y_pred = xgb_bayes_search.best_estimator_.predict(X_test)
+y_pred[:10]
+
+# y de teste(real)
+y_test[:10]
+
+# Visualizando onde a predição não foi correta.
+X_test[y_test != y_pred]
+
+# Visualizando a matriz de confusão
+cm = confusion_matrix(y_test,y_pred, normalize='true')
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=xgb_bayes_search.best_estimator_.classes_)
+print(f"{n}Matriz de Confusão")
+disp.plot()
+plt.show()
+
+# Avaliação do modelo
+total = len(y_test)
+acertos = (y_pred == y_test).sum()
+erros = total-acertos
+accuracy = (100*acertos/total).round(2)
+precision = (100*precision_score(y_test, y_pred)).round(2)
+recall = (100*recall_score(y_test, y_pred)).round(2)
+f1 = (100*f1_score(y_test, y_pred)).round(2)
+
+print(f"{n}Avaliação do modelo\n{r}")
+print("Tamanho total da base de teste:" +str(total)+ " produtos")
+print("Acertos da predição: " +str(acertos)+ " produtos, ou seja, " +str((100*(acertos/total)).round(2))+ "%.")
+print("Total de erros na predição: " +str(erros)+ " produtos, ou seja, " +str((100*(erros/total)).round(2))+ "%.\n")
+# Acurácia: soma dos acertos, dividido pela soma de todos os resultados, que é também o número total de amostras.
+print("Acurácia:", accuracy)
+# Precisão: razão entre o número de verdadeiros positivos e o número total de previsões positivas feitas pelo modelo.
+print("Precisão:", precision)
+# Recall: razão entre o número de verdadeiros positivos e o número total de casos positivos.
+print("Recall:", recall)
+# F1 Score: média harmônica entre a precisão e o recall.
+print("F1 Score:", f1)
